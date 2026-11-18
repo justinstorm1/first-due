@@ -32,7 +32,9 @@ export type Topic =
   | "overhaul"
   | "investigation"
   | "leadership"
-  | "njcode";
+  | "njcode"
+  | "standards"
+  | "extinguishers";
 
 export interface Question {
   id: string;
@@ -96,7 +98,8 @@ export type IncidentTypeId =
   | "gas"
   | "elevator"
   | "brush"
-  | "marine";
+  | "marine"
+  | "co";
 
 export type SceneFamily =
   | "fire"
@@ -131,6 +134,8 @@ export interface IncidentType {
   plan: Requirement[];
   calls: string[][]; // caller transcript variants
   locations: { address: string; zone: number; note: string }[];
+  /** Scenario modifiers (exposures, access, hazards) combined with weather & time of day. */
+  conditions: string[];
 }
 
 export interface Metrics {
@@ -185,7 +190,7 @@ export interface SceneState {
   pending: PendingQuestion | null;
   maydayTriggered: boolean;
   victimLost: boolean;
-  status: "active" | "complete";
+  status: "active" | "complete" | "abandoned";
   startedAt: number;
   endedAt: number | null;
   outcome: string | null;
@@ -209,6 +214,10 @@ export interface Incident {
   note: string;
   zone: number;
   transcript: string[];
+  /** e.g. "Gusty NW winds · Late night (0200) · Solar panels on the roof" */
+  conditions: string;
+  /** Generated to guarantee the standing-by player gets a run. */
+  forPlayer: boolean;
   createdAt: number;
   status: "pending" | "active" | "closed";
   units: string[];
@@ -259,7 +268,33 @@ export interface DebriefSummary {
   date: string;
 }
 
+export type ActivityKind =
+  | "session"
+  | "answer"
+  | "dispatch"
+  | "incident"
+  | "cert"
+  | "writeup"
+  | "left-scene"
+  | "profile";
+
+export interface ActivityEntry {
+  id: string;
+  /** ISO timestamp */
+  at: string;
+  kind: ActivityKind;
+  text: string;
+  /** Answer entries: question id + whether correct. */
+  questionId?: string;
+  correct?: boolean;
+  track?: Track;
+  /** Context, e.g. "Drill", "F26-01234 · Primary search" */
+  context?: string;
+}
+
 export interface Profile {
+  id: string;
+  createdAt: string;
   name: string;
   standing: number;
   xp: number;
@@ -268,6 +303,15 @@ export interface Profile {
   writeUps: WriteUp[];
   incidentsByRole: Record<Role, number>;
   history: DebriefSummary[];
+  /** Everything this profile has done, newest first. */
+  activity: ActivityEntry[];
+  /** Seconds spent in active sessions, by role. */
+  timeOnDuty: Record<Role, number>;
+}
+
+export interface Seat {
+  unitId: string;
+  crewId: string;
 }
 
 export type IconName =

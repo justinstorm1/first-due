@@ -5,6 +5,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-na
 
 import type { IconName } from "@/game/types";
 import { colors } from "@/theme/colors";
+import { LIQUID_GLASS, RADIUS, Surface } from "./glass";
 import { Icon, type ColorToken } from "./icon";
 
 export const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "ui-monospace, Menlo, monospace" });
@@ -34,23 +35,26 @@ export function Panel({ children, className = "", title, icon, right }: {
   right?: ReactNode;
 }) {
   return (
-    <View className={`rounded-xl border border-line bg-panel ${className}`}>
+    <Surface
+      radius={RADIUS.card}
+      className={`android:bg-panel web:border web:border-line web:bg-panel/90 web:shadow-sm ${LIQUID_GLASS ? "" : "ios:border ios:border-white/5 ios:bg-panel/90"} ${className}`}
+    >
       {title ? (
-        <View className="flex-row items-center gap-2 border-b border-line px-3 py-2">
+        <View className="flex-row items-center gap-2 border-b border-white/5 px-4 py-2.5 web:border-line">
           {icon ? <Icon name={icon} size={14} color="muted" /> : null}
-          <Mono className="flex-1 text-[11px] uppercase tracking-widest text-muted">{title}</Mono>
+          <Text className="flex-1 text-[12px] font-semibold tracking-tight text-muted ios:text-[13px] web:text-sm web:text-ink">{title}</Text>
           {right}
         </View>
       ) : null}
       {children}
-    </View>
+    </Surface>
   );
 }
 
 const BUTTON_TONE = {
   primary: { box: "bg-alert border-alert", text: "text-white", icon: "ink" },
   amber: { box: "bg-amber border-amber", text: "text-bg", icon: "bg" },
-  ghost: { box: "bg-raised border-line", text: "text-ink", icon: "ink" },
+  ghost: { box: "bg-raised border-line web:bg-transparent web:hover:bg-raised", text: "text-ink", icon: "ink" },
   radio: { box: "bg-radio border-radio", text: "text-bg", icon: "bg" },
 } as const satisfies Record<string, { box: string; text: string; icon: ColorToken }>;
 
@@ -65,19 +69,45 @@ export function Button({ label, onPress, icon, tone = "ghost", disabled, classNa
   small?: boolean;
 }) {
   const t = BUTTON_TONE[tone];
+  // Shape language: iOS capsule, Android M3 pill, web shadcn rounded-md.
+  const shape = "ios:rounded-full android:rounded-full web:rounded-md";
+  const size = small ? "min-h-[36px] px-3.5" : "min-h-[48px] px-5";
+  const content = (
+    <>
+      {icon ? <Icon name={icon} size={small ? 14 : 16} color={t.icon} /> : null}
+      <Text className={`font-semibold ${small ? "text-xs" : "text-[15px] web:text-sm"} ${t.text}`}>{label}</Text>
+    </>
+  );
+  const press = () => {
+    haptic("tap");
+    onPress();
+  };
+  // iOS 26: secondary buttons are interactive Liquid Glass capsules.
+  if (LIQUID_GLASS && tone === "ghost") {
+    return (
+      <Surface interactive radius={RADIUS.pill} className={`${disabled ? "opacity-40" : ""} ${className}`}>
+        <Pressable
+          accessibilityRole="button"
+          testID={testID}
+          disabled={disabled}
+          onPress={press}
+          className={`flex-row items-center justify-center gap-2 ${size}`}
+        >
+          {content}
+        </Pressable>
+      </Surface>
+    );
+  }
   return (
     <Pressable
       accessibilityRole="button"
       testID={testID}
       disabled={disabled}
-      onPress={() => {
-        haptic("tap");
-        onPress();
-      }}
-      className={`flex-row items-center justify-center gap-2 rounded-lg border ${small ? "min-h-[36px] px-3" : "min-h-[46px] px-4"} ${t.box} ${disabled ? "opacity-40" : "active:opacity-80"} ${className}`}
+      onPress={press}
+      android_ripple={{ color: "rgba(255,255,255,0.18)", borderless: false, foreground: true }}
+      className={`flex-row items-center justify-center gap-2 overflow-hidden border ${shape} ${size} ${t.box} ${disabled ? "opacity-40" : "active:opacity-80 web:hover:opacity-90"} web:transition-opacity web:focus-visible:outline-none web:focus-visible:ring-2 web:focus-visible:ring-amber web:focus-visible:ring-offset-2 web:ring-offset-bg ${className}`}
     >
-      {icon ? <Icon name={icon} size={small ? 14 : 16} color={t.icon} /> : null}
-      <Text className={`font-semibold ${small ? "text-xs" : "text-sm"} ${t.text}`}>{label}</Text>
+      {content}
     </Pressable>
   );
 }
@@ -92,7 +122,8 @@ export function Chip({ label, selected, onPress, tone = "info" }: {
   return (
     <Pressable
       onPress={onPress}
-      className={`min-h-[36px] justify-center rounded-full border px-3 ${selected ? sel : "border-line bg-raised"}`}
+      android_ripple={{ color: "rgba(255,255,255,0.15)" }}
+      className={`min-h-[36px] justify-center overflow-hidden border px-3.5 ios:rounded-full android:rounded-lg web:rounded-full web:transition-colors ${selected ? sel : "border-line bg-raised web:hover:bg-panel"}`}
     >
       <Text className={`text-xs ${selected ? "font-semibold text-ink" : "text-muted"}`}>{label}</Text>
     </Pressable>

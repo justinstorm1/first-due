@@ -55,7 +55,7 @@ export function CallQueue({ incidents, clock, selectedId, onSelect }: {
                   <Mono className="text-xs text-muted">{i.number}</Mono>
                   <View className="flex-1" />
                   <Mono className={`text-xs ${pending && age > 45 ? "text-alert" : "text-dim"}`}>
-                    {pending ? `${age}s` : i.scene ? "YOU" : i.dispatch?.by === "ai" ? "AI" : "DISP"}
+                    {pending ? `${age}s` : i.scene?.status === "active" ? "YOU" : i.dispatch?.by === "ai" ? "AI" : "DISP"}
                   </Mono>
                 </View>
                 <Text className="text-sm font-semibold text-ink">{pending ? "UNCLASSIFIED 911 CALL" : type.short}</Text>

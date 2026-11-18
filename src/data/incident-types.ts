@@ -4,7 +4,7 @@ import type { IncidentType, IncidentTypeId } from "@/game/types";
  * Call types with a simplified run card (the SOG "plan") used to score dispatches.
  * Addresses are fictional locations on real-sounding local roads.
  */
-export const INCIDENT_TYPES: IncidentType[] = [
+const BASE_TYPES: Omit<IncidentType, "conditions">[] = [
   {
     id: "res-fire",
     label: "Structure Fire — Residential",
@@ -296,7 +296,151 @@ export const INCIDENT_TYPES: IncidentType[] = [
       { address: "Navesink River boat ramp", zone: 1, note: "Shallow tidal river" },
     ],
   },
+  {
+    id: "co",
+    label: "CO Alarm / Carbon Monoxide",
+    short: "CO Alarm",
+    family: "gas",
+    building: "house",
+    priority: 2,
+    plan: [{ types: ["engine"], count: 1 }],
+    calls: [
+      [
+        "911, what's the address of your emergency?",
+        "Our carbon monoxide detector keeps going off and my husband says he has a headache.",
+        "Is anyone else feeling sick?",
+        "My daughter says she's dizzy. We just turned the heat on for the first time this year.",
+      ],
+      [
+        "911, what's the address of your emergency?",
+        "The CO alarm in the hallway is beeping four times and then pausing. Nobody feels sick.",
+        "Are you able to go outside?",
+        "Yes, we're standing in the driveway now.",
+      ],
+    ],
+    locations: [
+      { address: "61 Wilson Ave, Port Monmouth", zone: 5, note: "Gas furnace, attached garage" },
+      { address: "18 Ocean Blvd, Belford", zone: 7, note: "Bungalow, older boiler" },
+      { address: "402 Twin Brooks Ave", zone: 10, note: "Townhouse, shared wall" },
+      { address: "77 Lincroft Ave", zone: 3, note: "Colonial, generator in garage" },
+    ],
+  },
 ];
+
+/** Scenario modifiers per call type. Combined with weather × time of day for variety. */
+const CONDITIONS: Record<IncidentTypeId, string[]> = {
+  "res-fire": [
+    "Hoarding conditions reported inside.",
+    "Exposure B is an occupied house 10 feet away.",
+    "Long driveway: a 400-foot stretch to the nearest hydrant.",
+    "Solar panels cover most of the roof.",
+    "Lightweight-truss floor over a finished basement.",
+    "Neighbor says a bedridden resident lives on the first floor.",
+    "Oxygen concentrator in use by an occupant.",
+    "Security bars on the first-floor windows.",
+  ],
+  "apt-fire": [
+    "Multiple occupants at windows on Division 3.",
+    "Open stairwell is charged with smoke.",
+    "Standpipe in the building is out of service (red-tagged).",
+    "Parking lot is packed; aerial setup space is limited.",
+    "Common cockloft runs the full length of the building.",
+    "Building alarm panel shows trouble on all zones.",
+  ],
+  "comm-fire": [
+    "Bowstring truss roof over the anchor store.",
+    "Rain roof added over the original roof, creating a void.",
+    "Pool supply store next door stores chlorine products.",
+    "Rear doors are steel with drop bars.",
+    "Second-floor apartments above the stores.",
+    "Sprinkler system was shut down for repair.",
+  ],
+  "veh-fire": [
+    "Vehicle is a hybrid with a high-voltage battery.",
+    "Fuel is running toward a storm drain.",
+    "Car is parked against a building wall.",
+    "Live traffic in the adjacent lane.",
+    "Vehicle has CNG fuel tanks.",
+  ],
+  "mva-ent": [
+    "Vehicle is on its side.",
+    "A power line is down across the hood.",
+    "Second patient is ejected and lying in the roadway.",
+    "Car is an EV; airbags did not deploy.",
+    "Heavy rush-hour traffic is backing up.",
+    "Child seat visible in the back seat.",
+  ],
+  alarm: [
+    "Keyholder is unreachable.",
+    "This address has had three false alarms this month.",
+    "Waterflow alarm with no visible smoke.",
+    "Building is under renovation with partial impairments.",
+    "After-hours, building locked with a Knox box.",
+  ],
+  gas: [
+    "Meter readings at the door are 20% of LEL.",
+    "Strong odor, wind is calm.",
+    "Utility ETA is 45 minutes.",
+    "School bus stop on the corner.",
+    "Odor reported in the house next door too.",
+  ],
+  elevator: [
+    "One occupant is in a wheelchair.",
+    "Building has no on-site maintenance staff.",
+    "Car is stuck about 2 feet below the landing.",
+    "Elevator mechanic ETA is 90 minutes.",
+    "Occupant reports chest tightness.",
+  ],
+  brush: [
+    "Red flag warning in effect.",
+    "Fire is moving upslope toward homes.",
+    "Narrow trail access only for brush units.",
+    "Spot fires across the trail.",
+    "Wind shift forecast within the hour.",
+  ],
+  marine: [
+    "Fuel dock is 40 feet away.",
+    "Tide is going out and the current is strong.",
+    "Boats are packed bow-to-stern in adjacent slips.",
+    "Owner says there are propane tanks for the galley aboard.",
+    "Floating dock is narrow and unstable.",
+  ],
+  co: [
+    "Readings at the door are 150 ppm.",
+    "Generator running in the attached garage.",
+    "Infant and elderly occupant in the home.",
+    "Furnace was just serviced yesterday.",
+    "Detector is 9 years old.",
+  ],
+};
+
+export const INCIDENT_TYPES: IncidentType[] = BASE_TYPES.map((t) => ({ ...t, conditions: CONDITIONS[t.id] }));
+
+export const WEATHER = [
+  "Clear and calm",
+  "Light rain, slick roads",
+  "Gusty NW winds, 20–25 mph",
+  "Dense fog off the bay",
+  "Below freezing; hydrants may be frozen",
+  "Heat advisory, 94°F",
+  "Snow squalls, low visibility",
+  "Thunderstorms in the area",
+];
+
+export const TIMES = [
+  "Early morning (0500)",
+  "Morning rush (0800)",
+  "Midday",
+  "Evening rush (1730)",
+  "Late night (0200)",
+  "Weekend afternoon",
+];
+
+/** Distinct scenario combinations: location × condition × weather × time, summed over call types. */
+export const SCENARIO_COUNT = INCIDENT_TYPES.reduce(
+  (sum, t) => sum + t.locations.length * t.conditions.length * WEATHER.length * TIMES.length,
+  0,
+);
 
 export const incidentTypeById = (id: IncidentTypeId) =>
   INCIDENT_TYPES.find((t) => t.id === id) ?? INCIDENT_TYPES[0];

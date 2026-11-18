@@ -1,11 +1,12 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import Animated, { FadeInRight } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Screen } from "@/components/glass";
 import { Icon } from "@/components/icon";
-import { TopBar, useScrollPadding } from "@/components/safe-area";
+import { SafeBody, TopBar, useScrollPadding } from "@/components/safe-area";
 import { QuestionSheet } from "@/components/question-sheet";
 import { SceneVisual } from "@/components/scene-visual";
 import { Button, haptic, Meter, Mono, Panel } from "@/components/ui";
@@ -27,6 +28,8 @@ export default function SceneScreen() {
   const chooseAction = useGame((s) => s.chooseAction);
   const answerScene = useGame((s) => s.answerScene);
   const continueScene = useGame((s) => s.continueScene);
+  const leaveScene = useGame((s) => s.leaveScene);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const scrollPad = useScrollPadding();
 
   const scene = incident?.scene;
@@ -41,12 +44,14 @@ export default function SceneScreen() {
     if (mayday) haptic("error");
   }, [mayday]);
 
-  if (!incident || !scene) {
+  if (!incident || !scene || scene.status === "abandoned") {
     return (
-      <SafeAreaView className="flex-1 items-center justify-center gap-4 bg-bg p-6">
+      <SafeAreaView className="flex-1 bg-bg">
+        <View className="flex-1 items-center justify-center gap-4 p-6">
         <Icon name="alert" size={32} color="amber" />
         <Text className="text-center text-ink">This incident is no longer active.</Text>
         <Button label="Main menu" icon="home" onPress={() => router.navigate("/")} />
+        </View>
       </SafeAreaView>
     );
   }
@@ -112,7 +117,7 @@ export default function SceneScreen() {
   );
 
   return (
-    <View className="flex-1 bg-bg">
+    <Screen>
       <TopBar>
         <Pressable accessibilityLabel="Open CAD" onPress={() => router.push("/dispatch")} className="h-11 w-11 items-center justify-center rounded-lg bg-panel">
           <Icon name="headset" size={18} color="info" />
@@ -132,6 +137,7 @@ export default function SceneScreen() {
         </View>
       ) : null}
 
+      <SafeBody>
       <ScrollView contentContainerClassName="gap-3 p-3 w-full max-w-[1100px] self-center" contentContainerStyle={scrollPad}>
         <SceneVisual building={type.building} metrics={m} mayday={mayday} burning={type.family === "fire" || type.family === "wildland" || type.family === "marine"} />
         {wide ? (
@@ -145,7 +151,26 @@ export default function SceneScreen() {
             {actions}
           </>
         )}
+        <Panel title="Leave the incident" icon="headset">
+          <View className="gap-2 p-4">
+            <Text className="text-sm text-muted">
+              Step away before the call ends. The incident keeps running without you, you take the CAD console, and the AI dispatcher is turned off.
+            </Text>
+            <Button
+              testID="leave-scene"
+              label={confirmLeave ? "Tap again to leave and take the console" : "Leave scene → take the console"}
+              icon="headset"
+              tone={confirmLeave ? "primary" : "ghost"}
+              onPress={() => {
+                if (!confirmLeave) return setConfirmLeave(true);
+                leaveScene(incident.id);
+                router.replace("/dispatch");
+              }}
+            />
+          </View>
+        </Panel>
       </ScrollView>
+      </SafeBody>
 
       <QuestionSheet
         visible={!!scene.pending}
@@ -155,6 +180,6 @@ export default function SceneScreen() {
         onAnswer={(c) => answerScene(incident.id, c)}
         onContinue={() => continueScene(incident.id)}
       />
-    </View>
+    </Screen>
   );
 }

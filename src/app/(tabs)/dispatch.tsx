@@ -3,8 +3,9 @@ import { useState } from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 
 import { CallDetail, CallQueue, LogFeed, TownMap, UnitsBoard } from "@/components/cad";
+import { Screen } from "@/components/glass";
 import { Icon } from "@/components/icon";
-import { BottomBar, TopBar, useScrollPadding } from "@/components/safe-area";
+import { SafeBody, TAB_SCROLL_PADDING, TopBar } from "@/components/safe-area";
 import { QuestionSheet } from "@/components/question-sheet";
 import { Button, haptic, Mono, StatusDot } from "@/components/ui";
 import { questionById } from "@/data/questions";
@@ -32,13 +33,14 @@ export default function DispatchScreen() {
   const dq = useGame((s) => s.dispatchQuestion);
   const dispatchIncident = useGame((s) => s.dispatchIncident);
   const takeRole = useGame((s) => s.takeRole);
-  const returnToDispatch = useGame((s) => s.returnToDispatch);
+  const takeConsole = useGame((s) => s.takeConsole);
   const answerDQ = useGame((s) => s.answerDispatchQuestion);
   const closeDQ = useGame((s) => s.closeDispatchQuestion);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("queue");
-  const scrollPad = useScrollPadding(16);
+  const scrollPad = TAB_SCROLL_PADDING;
+  const startDispatcher = useGame((s) => s.startDispatcher);
 
   const pending = incidents.filter((i) => i.status === "pending");
   const selected = incidents.find((i) => i.id === selectedId) ?? pending[0];
@@ -75,17 +77,14 @@ export default function DispatchScreen() {
   const question = dq ? questionById(dq.questionId) : undefined;
 
   return (
-    <View className="flex-1 bg-bg">
+    <Screen>
       <TopBar>
-        <Pressable accessibilityLabel="Main menu" onPress={() => router.navigate("/")} className="h-11 w-11 items-center justify-center rounded-lg bg-panel">
-          <Icon name="home" size={18} />
-        </Pressable>
         <View className="flex-1">
           <Text className="text-base font-bold text-ink">CAD · Middletown Fire</Text>
           <View className="flex-row items-center gap-1.5">
-            <StatusDot tone={isDispatcher ? "radio" : "info"} />
+            <StatusDot tone={isDispatcher ? "radio" : role === null ? "dim" : "info"} />
             <Mono className="text-[10px] uppercase tracking-widest text-muted">
-              {isDispatcher ? "You have the console" : "AI dispatcher active"}
+              {isDispatcher ? "You have the console" : role === null ? "Console off" : "AI dispatcher active"}
             </Mono>
           </View>
         </View>
@@ -95,7 +94,16 @@ export default function DispatchScreen() {
         </View>
       </TopBar>
 
-      {!isDispatcher ? (
+      <SafeBody>
+      {role === null ? (
+        <View className="flex-1 items-center justify-center gap-4 p-6">
+          <Icon name="headset" size={40} color="muted" />
+          <Text className="text-center text-base text-ink">The console is off. Start a dispatcher tour to take 911 calls.</Text>
+          <Button testID="start-cad" label="Start dispatcher tour" icon="headset" tone="amber" onPress={startDispatcher} />
+        </View>
+      ) : null}
+
+      {role !== null && !isDispatcher ? (
         <View className="flex-row items-center gap-3 border-b border-info/40 bg-info/10 px-4 py-2">
           <Icon name="headset" size={16} color="info" />
           <Text className="flex-1 text-xs text-ink">
@@ -104,18 +112,18 @@ export default function DispatchScreen() {
           {myScene ? (
             <Button small label="To scene" icon="flame" tone="amber" onPress={() => router.push({ pathname: "/scene/[incidentId]", params: { incidentId: myScene.id } })} />
           ) : (
-            <Button small label="Take console" icon="headset" tone="radio" onPress={returnToDispatch} />
+            <Button small label="Take console" icon="headset" tone="radio" onPress={takeConsole} />
           )}
         </View>
       ) : null}
 
-      {wide ? (
+      {role === null ? null : wide ? (
         <View className="flex-1 flex-row gap-3 px-3 pt-3">
-          <ScrollView className="w-[300px] flex-none" contentContainerStyle={scrollPad}>
+          <ScrollView contentInsetAdjustmentBehavior="automatic" className="w-[300px] flex-none" contentContainerStyle={scrollPad}>
             <CallQueue incidents={incidents} clock={clock} selectedId={selected?.id ?? null} onSelect={select} />
           </ScrollView>
-          <ScrollView className="flex-1" contentContainerStyle={scrollPad}>{detail}</ScrollView>
-          <ScrollView className="w-[340px] flex-none" contentContainerClassName="gap-3" contentContainerStyle={scrollPad}>
+          <ScrollView contentInsetAdjustmentBehavior="automatic" className="flex-1" contentContainerStyle={scrollPad}>{detail}</ScrollView>
+          <ScrollView contentInsetAdjustmentBehavior="automatic" className="w-[340px] flex-none" contentContainerClassName="gap-3" contentContainerStyle={scrollPad}>
             <TownMap units={units} incidents={incidents} />
             <UnitsBoard units={units} />
             <LogFeed log={log} />
@@ -123,30 +131,37 @@ export default function DispatchScreen() {
         </View>
       ) : (
         <>
-          <ScrollView className="flex-1" contentContainerClassName="gap-3 p-3 pb-6">
-            {tab === "queue" ? <CallQueue incidents={incidents} clock={clock} selectedId={selected?.id ?? null} onSelect={select} /> : null}
-            {tab === "call" ? detail : null}
-            {tab === "units" ? <UnitsBoard units={units} /> : null}
-            {tab === "map" ? <TownMap units={units} incidents={incidents} /> : null}
-            {tab === "log" ? <LogFeed log={log} limit={80} /> : null}
-          </ScrollView>
-          <BottomBar>
+          {/* Segmented control sits at the top so it never collides with the native tab bar. */}
+          <View className="flex-row gap-1 border-b border-line bg-surface/60 px-2 py-1.5">
             {TABS.map((t) => {
               const on = tab === t.key;
               const badge = t.key === "queue" && pending.length > 0;
               return (
-                <Pressable key={t.key} onPress={() => setTab(t.key)} className="min-h-[54px] flex-1 items-center justify-center gap-1">
+                <Pressable
+                  key={t.key}
+                  onPress={() => setTab(t.key)}
+                  className={`min-h-[44px] flex-1 items-center justify-center gap-0.5 rounded-full ${on ? "bg-raised" : ""}`}
+                >
                   <View>
-                    <Icon name={t.icon} size={18} color={on ? "amber" : "muted"} />
+                    <Icon name={t.icon} size={16} color={on ? "amber" : "muted"} />
                     {badge ? <View className="absolute -right-1.5 -top-1 h-2.5 w-2.5 rounded-full bg-alert" /> : null}
                   </View>
                   <Text className={`text-[10px] ${on ? "font-semibold text-amber" : "text-muted"}`}>{t.label}</Text>
                 </Pressable>
               );
             })}
-          </BottomBar>
+          </View>
+          <ScrollView contentInsetAdjustmentBehavior="automatic" className="flex-1" contentContainerClassName="gap-3 p-3" contentContainerStyle={scrollPad}>
+            {tab === "queue" ? <CallQueue incidents={incidents} clock={clock} selectedId={selected?.id ?? null} onSelect={select} /> : null}
+            {tab === "call" ? detail : null}
+            {tab === "units" ? <UnitsBoard units={units} /> : null}
+            {tab === "map" ? <TownMap units={units} incidents={incidents} /> : null}
+            {tab === "log" ? <LogFeed log={log} limit={80} /> : null}
+          </ScrollView>
         </>
       )}
+
+      </SafeBody>
 
       <QuestionSheet
         visible={!!dq && isDispatcher}
@@ -157,6 +172,6 @@ export default function DispatchScreen() {
         onContinue={closeDQ}
         continueLabel="Back to console"
       />
-    </View>
+    </Screen>
   );
 }

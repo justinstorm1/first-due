@@ -1,8 +1,9 @@
-import { incidentTypeById, INCIDENT_TYPES } from "@/data/incident-types";
-import { QUESTIONS } from "@/data/questions";
+import { incidentTypeById, INCIDENT_TYPES, TIMES, WEATHER } from "@/data/incident-types";
+import { isGenerated, QUESTIONS } from "@/data/questions";
 import { MAYDAY_PHASE, PHASES_BY_FAMILY, SEAT_LINE, VEHICLE_FIRE, type PhaseDef } from "@/data/scenes";
 import { stationById, UNIT_TYPE_LABEL } from "@/data/town";
 import type {
+  ActivityEntry,
   CertId,
   DispatchEval,
   FieldRole,
@@ -36,9 +37,22 @@ export function formatClock(sec: number) {
 let incidentSeq = 1000 + Math.floor(Math.random() * 8000);
 
 // ───────────── incidents ─────────────
-export function createIncident(now: number, typeId?: IncidentTypeId): Incident {
-  const type = typeId ? incidentTypeById(typeId) : pick(INCIDENT_TYPES);
-  const loc = pick(type.locations);
+export function createIncident(
+  now: number,
+  opts: { typeId?: IncidentTypeId; typeIds?: IncidentTypeId[]; zone?: number; forPlayer?: boolean } = {},
+): Incident {
+  const allowed = opts.typeId
+    ? [incidentTypeById(opts.typeId)]
+    : opts.typeIds
+      ? INCIDENT_TYPES.filter((t) => opts.typeIds!.includes(t.id))
+      : INCIDENT_TYPES;
+  const pool = allowed.length ? allowed : INCIDENT_TYPES;
+  // Prefer a call type with a real location in the requested zone (first-due area).
+  const inZone = opts.zone !== undefined ? pool.filter((t) => t.locations.some((l) => l.zone === opts.zone)) : [];
+  const type = pick(inZone.length ? inZone : pool);
+  const zoneLocs = opts.zone !== undefined ? type.locations.filter((l) => l.zone === opts.zone) : [];
+  const base = pick(zoneLocs.length ? zoneLocs : type.locations);
+  const loc = opts.zone !== undefined && !zoneLocs.length ? { ...base, zone: opts.zone } : base;
   incidentSeq += 1;
   return {
     id: uid(),
@@ -48,6 +62,8 @@ export function createIncident(now: number, typeId?: IncidentTypeId): Incident {
     note: loc.note,
     zone: loc.zone,
     transcript: pick(type.calls),
+    conditions: `${pick(WEATHER)} · ${pick(TIMES)} · ${pick(type.conditions)}`,
+    forPlayer: !!opts.forPlayer,
     createdAt: now,
     status: "pending",
     units: [],
@@ -128,18 +144,24 @@ export function pickQuestion(role: FieldRole | "dispatcher", topics: Topic[], us
     QUESTIONS.filter((x) => tracks.includes(x.level)),
   ];
   for (const tier of tiers) {
-    if (tier.length) return pick(fresh(tier));
+    if (!tier.length) continue;
+    // Balance the ~100 hand-written scenario questions against ~2,000 computed ones.
+    const hand = tier.filter((x) => !isGenerated(x.id));
+    const gen = tier.filter((x) => isGenerated(x.id));
+    const source = hand.length && gen.length ? (Math.random() < 0.55 ? hand : gen) : tier;
+    return pick(fresh(source));
   }
   return pick(QUESTIONS);
 }
 
 // ───────────── scenes ─────────────
-function fillPhase(def: PhaseDef, role: FieldRole, incident: Incident, unitName: string): ScenePhase {
-  const text = def.text
+function fillPhase(def: PhaseDef, role: FieldRole, incident: Incident, unitName: string, first = false): ScenePhase {
+  const body = def.text
     .replace("{unit}", unitName)
     .replace("{address}", incident.address)
     .replace("{note}", incident.note)
     .replace("{seat}", SEAT_LINE[role]);
+  const text = first && incident.conditions ? `${body}\n\nConditions: ${incident.conditions}` : body;
   return { key: def.key, title: def.title, text, actions: def.actions[role] };
 }
 
@@ -159,7 +181,7 @@ export function createScene(
     personName: person.name,
     personRank: person.rank,
     family: type.family,
-    phases: defs.map((d) => fillPhase(d, role, incident, unit.name)),
+    phases: defs.map((d, i) => fillPhase(d, role, incident, unit.name, i === 0)),
     phaseIndex: 0,
     phaseDone: [],
     metrics: {
@@ -249,8 +271,10 @@ export const CERTS: {
   { id: "chief", title: "Fire Chief / Incident Commander", track: "chief", min: 25, pct: 0.8, requires: ["ast"], standard: "NFPA 1021 · NIMS" },
 ];
 
-export const emptyProfile = (): Profile => ({
-  name: "Probie",
+export const emptyProfile = (name = "Probie"): Profile => ({
+  id: uid(),
+  createdAt: new Date().toISOString(),
+  name,
   standing: 75,
   xp: 0,
   tracks: {
@@ -264,7 +288,36 @@ export const emptyProfile = (): Profile => ({
   writeUps: [],
   incidentsByRole: { dispatcher: 0, ff: 0, officer: 0, chief: 0 },
   history: [],
+  activity: [{ id: uid(), at: new Date().toISOString(), kind: "profile", text: `Profile created: ${name}` }],
+  timeOnDuty: { dispatcher: 0, ff: 0, officer: 0, chief: 0 },
 });
+
+/** Fill fields added after a profile was first saved. */
+export function migrateProfile(p: Partial<Profile>): Profile {
+  const base = emptyProfile(p.name ?? "Probie");
+  return {
+    ...base,
+    ...p,
+    id: p.id ?? base.id,
+    createdAt: p.createdAt ?? base.createdAt,
+    activity: p.activity ?? [],
+    timeOnDuty: p.timeOnDuty ?? base.timeOnDuty,
+    history: p.history ?? [],
+  } as Profile;
+}
+
+const ACTIVITY_CAP = 5000;
+export function logActivity(p: Profile, entry: Omit<ActivityEntry, "id" | "at">): Profile {
+  const e: ActivityEntry = { id: uid(), at: new Date().toISOString(), ...entry };
+  return { ...p, activity: [e, ...p.activity].slice(0, ACTIVITY_CAP) };
+}
+
+function logEvents(p: Profile, events: CareerEvent[]): Profile {
+  return events.reduceRight(
+    (acc, ev) => logActivity(acc, { kind: ev.kind === "writeup" ? "writeup" : "cert", text: ev.text }),
+    p,
+  );
+}
 
 export const hasCert = (p: Profile, id: CertId) => p.certificates[id]?.status === "earned";
 
@@ -294,6 +347,7 @@ export function recordAnswer(
   profile: Profile,
   track: Track,
   correct: boolean,
+  info?: { questionId?: string; context?: string; text?: string },
 ): { profile: Profile; events: CareerEvent[] } {
   const t = profile.tracks[track];
   const tracks = {
@@ -313,14 +367,26 @@ export function recordAnswer(
     next.writeUps = [w, ...next.writeUps];
     events.push({ kind: "writeup", text: w.reason });
   }
-  return evaluateCerts(next, events);
+  const logged = info
+    ? logActivity(next, {
+        kind: "answer",
+        text: info.text ?? (correct ? "Answered correctly" : "Answered incorrectly"),
+        questionId: info.questionId,
+        correct,
+        track,
+        context: info.context,
+      })
+    : next;
+  const r = evaluateCerts(logged, events);
+  return { profile: logEvents(r.profile, r.events), events: r.events };
 }
 
 export function penalize(profile: Profile, amount: number, reason: string, severity: WriteUp["severity"] = "warning") {
   const next: Profile = { ...profile, standing: clamp(profile.standing - amount) };
   const w = writeUp(reason, severity);
-  next.writeUps = [w, ...profile.writeUps].slice(0, 50);
-  return evaluateCerts(next, [{ kind: "writeup", text: reason }]);
+  next.writeUps = [w, ...profile.writeUps].slice(0, 500);
+  const r = evaluateCerts(next, [{ kind: "writeup", text: reason }]);
+  return { profile: logEvents(r.profile, r.events), events: r.events };
 }
 
 function writeUp(reason: string, severity: WriteUp["severity"]): WriteUp {

@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { Question } from "@/game/types";
+import { RADIUS, Surface } from "./glass";
 import { Icon } from "./icon";
 import { Button, haptic, Mono } from "./ui";
 
@@ -29,10 +30,9 @@ export function QuestionSheet({ visible, heading, question, choice, onAnswer, on
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (answered) onContinue(); }}>
       <View className="flex-1 justify-end bg-black/70">
-        <SafeAreaView
-          edges={["bottom", "left", "right"]}
-          className="max-h-[88%] w-full max-w-[720px] self-center rounded-t-2xl border border-line bg-surface pb-4"
-        >
+        <Surface radius={RADIUS.sheet} topOnly className="max-h-[88%] w-full max-w-[720px] self-center border border-line bg-surface">
+        <SafeAreaView edges={["bottom", "left", "right"]} className="shrink">
+          <View className="shrink pb-4">
           <View className="flex-row items-center gap-2 border-b border-line px-4 py-3">
             <Icon name="clipboard" size={16} color="amber" />
             <View className="flex-1">
@@ -86,7 +86,9 @@ export function QuestionSheet({ visible, heading, question, choice, onAnswer, on
               <Button testID="continue" label={continueLabel} tone="amber" icon="play" onPress={onContinue} />
             </View>
           ) : null}
-        </SafeAreaView>
+        </View>
+          </SafeAreaView>
+        </Surface>
       </View>
     </Modal>
   );

@@ -1,5 +1,7 @@
 import type { Question, Topic, Track } from "@/game/types";
 
+import { GENERATED_QUESTIONS } from "./generated-questions";
+
 /**
  * Training question bank modeled on IFSTA / NFPA / NJDFS exam content areas.
  * This is a study aid, not official exam material. Verify against your current
@@ -16,7 +18,7 @@ const q = (
   reference: string,
 ): Question => ({ id, level, topic, prompt, choices, answer, explanation, reference });
 
-export const QUESTIONS: Question[] = [
+export const HANDWRITTEN_QUESTIONS: Question[] = [
   // ───────────── DISPATCH / TELECOMMUNICATOR ─────────────
   q("d01", "dispatch", "dispatch", "What is the FIRST piece of information a telecommunicator should obtain and verify on a 911 call?",
     ["The caller's name", "The location of the emergency", "The nature of the emergency", "The callback number"], 1,
@@ -349,4 +351,9 @@ export const QUESTIONS: Question[] = [
     "Committing crews to non-defensible structures puts them at unacceptable risk.", "NWCG WUI Structure Triage"),
 ];
 
-export const questionById = (id: string) => QUESTIONS.find((x) => x.id === id);
+/** Hand-written scenario questions first, then ~2,000 computed questions. */
+export const QUESTIONS: Question[] = [...HANDWRITTEN_QUESTIONS, ...GENERATED_QUESTIONS];
+
+const BY_ID = new Map(QUESTIONS.map((x) => [x.id, x]));
+export const questionById = (id: string) => BY_ID.get(id);
+export const isGenerated = (id: string) => id.startsWith("g-");

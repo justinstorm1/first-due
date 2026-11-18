@@ -1,11 +1,11 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect } from "react";
 import { ScrollView, Text, View } from "react-native";
 import Animated, { FadeInDown, ZoomIn } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Screen } from "@/components/glass";
 import { Icon } from "@/components/icon";
-import { TopBar, useScrollPadding } from "@/components/safe-area";
+import { SafeBody, TopBar, useScrollPadding } from "@/components/safe-area";
 import { Button, Mono, Panel } from "@/components/ui";
 import { incidentTypeById } from "@/data/incident-types";
 import { questionById } from "@/data/questions";
@@ -19,19 +19,10 @@ export default function DebriefScreen() {
   const incident = useGame((s) => s.incidents.find((i) => i.id === incidentId));
   const role = useGame((s) => s.role);
   const clock = useGame((s) => s.clock);
-  const autoAt = useGame((s) => s.autoDispatchAt);
-  const pendingSceneId = useGame((s) => s.pendingSceneId);
-  const respondNow = useGame((s) => s.respondNow);
-  const returnToDispatch = useGame((s) => s.returnToDispatch);
-  const consumePending = useGame((s) => s.consumePendingScene);
+  const playerCallAt = useGame((s) => s.playerCallAt);
+  const takeConsole = useGame((s) => s.takeConsole);
   const exitToMenu = useGame((s) => s.exitToMenu);
   const scrollPad = useScrollPadding();
-
-  useEffect(() => {
-    if (!pendingSceneId) return;
-    consumePending();
-    router.replace({ pathname: "/scene/[incidentId]", params: { incidentId: pendingSceneId } });
-  }, [pendingSceneId, consumePending]);
 
   const scene = incident?.scene;
   if (!incident || !scene) {
@@ -46,20 +37,23 @@ export default function DebriefScreen() {
   const g = sceneGrade(scene);
   const type = incidentTypeById(incident.typeId);
   const fieldRole = role !== null && role !== "dispatcher";
-  const countdown = autoAt !== null ? Math.max(0, autoAt - clock) : null;
+  const countdown = playerCallAt !== null ? Math.max(0, playerCallAt - clock) : null;
   const duration = (scene.endedAt ?? clock) - scene.startedAt;
 
   return (
-    <View className="flex-1 bg-bg">
+    <Screen>
       <TopBar>
         <Icon name="clipboard" size={18} color="amber" />
         <Text className="flex-1 text-base font-bold text-ink">After-action review</Text>
         <Mono className="text-xs text-muted">{incident.number}</Mono>
       </TopBar>
+      <SafeBody>
       <ScrollView contentContainerClassName="gap-4 p-4 w-full max-w-[820px] self-center" contentContainerStyle={scrollPad}>
         <View className="flex-row items-center gap-4">
-          <Animated.View entering={ZoomIn.springify()} className="h-20 w-20 items-center justify-center rounded-2xl border border-line bg-panel">
-            <Text className={`text-5xl font-black ${GRADE_TONE[g.grade]}`}>{g.grade}</Text>
+          <Animated.View entering={ZoomIn.springify()}>
+            <View className="h-20 w-20 items-center justify-center rounded-2xl border border-line bg-panel">
+              <Text className={`text-5xl font-black ${GRADE_TONE[g.grade]}`}>{g.grade}</Text>
+            </View>
           </Animated.View>
           <View className="flex-1 gap-1">
             <Text className="text-xl font-bold text-ink">{type.short}</Text>
@@ -75,31 +69,28 @@ export default function DebriefScreen() {
         </View>
 
         {fieldRole ? (
-          <Panel title="Next assignment" icon="siren">
-            <View className="gap-3 p-3">
+          <Panel title="Back in service" icon="radio">
+            <View className="gap-3 p-4">
               <Text className="text-sm text-ink">
                 {countdown !== null
-                  ? `You're still in service. Auto-dispatch to your next incident in ${countdown}s.`
-                  : "Preparing your next assignment…"}
+                  ? `You're available. The AI dispatcher will tone you out within ${countdown}s.`
+                  : "You're available and monitoring the radio."}
               </Text>
               <View className="flex-row flex-wrap gap-2">
                 <Button
-                  label="Respond now"
-                  icon="siren"
-                  tone="primary"
+                  label="Return to quarters"
+                  icon="home"
+                  tone="amber"
                   className="flex-1"
-                  onPress={() => {
-                    const id = respondNow();
-                    if (id) router.replace({ pathname: "/scene/[incidentId]", params: { incidentId: id } });
-                  }}
+                  onPress={() => router.replace("/standby")}
                 />
                 <Button
-                  label="Return to Dispatch"
+                  label="Take the console"
                   icon="headset"
                   tone="radio"
                   className="flex-1"
                   onPress={() => {
-                    returnToDispatch();
+                    takeConsole();
                     router.replace("/dispatch");
                   }}
                 />
@@ -138,7 +129,8 @@ export default function DebriefScreen() {
           }}
         />
       </ScrollView>
-    </View>
+      </SafeBody>
+    </Screen>
   );
 }
 
