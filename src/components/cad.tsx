@@ -4,7 +4,7 @@ import Animated, { FadeIn, LinearTransition } from "react-native-reanimated";
 
 import { incidentTypeById, INCIDENT_TYPES } from "@/data/incident-types";
 import { STATIONS, stationById, UNIT_TYPE_LABEL } from "@/data/town";
-import { formatClock, travelSeconds } from "@/game/engine";
+import { formatClock, missingFor, travelSeconds } from "@/game/engine";
 import type { Incident, IncidentTypeId, LogEntry, Unit, UnitStatus } from "@/game/types";
 import { Icon } from "./icon";
 import { Button, Chip, Mono, Panel, StatusDot } from "./ui";
@@ -33,26 +33,37 @@ export function CallQueue({ incidents, clock, selectedId, onSelect }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const rank = (i: Incident) => (i.status === "pending" ? 0 : i.update?.status === "pending" ? 1 : 2);
   const open = incidents
     .filter((i) => i.status !== "closed")
-    .sort((a, b) => (a.status === "pending" ? -1 : 0) - (b.status === "pending" ? -1 : 0) || b.createdAt - a.createdAt);
+    .sort((a, b) => rank(a) - rank(b) || b.createdAt - a.createdAt);
+  const updated = open.filter((i) => i.update?.status === "pending").length;
   return (
-    <Panel title={`Call Queue · ${open.filter((i) => i.status === "pending").length} pending`} icon="siren">
+    <Panel
+      title={`Call Queue · ${open.filter((i) => i.status === "pending").length} pending${updated ? ` · ${updated} updated` : ""}`}
+      icon="siren"
+    >
       <View className="gap-2 p-2">
         {open.length === 0 ? <Text className="p-3 text-sm text-dim">No active calls. Stand by…</Text> : null}
         {open.map((i) => {
           const type = incidentTypeById(i.typeId);
           const pending = i.status === "pending";
+          const isUpdated = i.update?.status === "pending";
           const age = clock - i.createdAt;
           return (
             <Animated.View key={i.id} entering={FadeIn} layout={LinearTransition}>
               <Pressable
                 onPress={() => onSelect(i.id)}
-                className={`gap-1 rounded-lg border p-3 ${selectedId === i.id ? "border-amber bg-raised" : pending ? "border-alert/60 bg-alert/10" : "border-line bg-surface"}`}
+                className={`gap-1 rounded-lg border p-3 ${selectedId === i.id ? "border-amber bg-raised" : pending ? "border-alert/60 bg-alert/10" : isUpdated ? "border-amber/70 bg-amber/10" : "border-line bg-surface"}`}
               >
                 <View className="flex-row items-center gap-2">
                   <StatusDot tone={pending ? "alert" : PRIORITY_TONE[type.priority]} />
                   <Mono className="text-xs text-muted">{i.number}</Mono>
+                  {isUpdated ? (
+                    <View className="rounded bg-amber px-1.5 py-0.5">
+                      <Mono className="text-[9px] font-bold text-bg">UPDATED</Mono>
+                    </View>
+                  ) : null}
                   <View className="flex-1" />
                   <Mono className={`text-xs ${pending && age > 45 ? "text-alert" : "text-dim"}`}>
                     {pending ? `${age}s` : i.scene?.status === "active" ? "YOU" : i.dispatch?.by === "ai" ? "AI" : "DISP"}
@@ -70,13 +81,15 @@ export function CallQueue({ incidents, clock, selectedId, onSelect }: {
 }
 
 // ───────────── Call detail ─────────────
-export function CallDetail({ incident, units, clock, onDispatch, onPlayRole, canPlayRole }: {
+export function CallDetail({ incident, units, clock, onDispatch, onPlayRole, canPlayRole, onAddUnits, onRelease }: {
   incident: Incident | undefined;
   units: Unit[];
   clock: number;
   onDispatch: (classifiedAs: IncidentTypeId, unitIds: string[]) => void;
   onPlayRole: (unitId: string, crewId: string) => void;
   canPlayRole: boolean;
+  onAddUnits: (unitIds: string[]) => void;
+  onRelease: (unitId: string) => void;
 }) {
   if (!incident) {
     return (
@@ -91,7 +104,16 @@ export function CallDetail({ incident, units, clock, onDispatch, onPlayRole, can
   return incident.status === "pending" ? (
     <PendingCall key={incident.id} incident={incident} units={units} clock={clock} onDispatch={onDispatch} />
   ) : (
-    <ActiveCall incident={incident} units={units} onPlayRole={onPlayRole} canPlayRole={canPlayRole} />
+    <ActiveCall
+      key={incident.id}
+      incident={incident}
+      units={units}
+      clock={clock}
+      onPlayRole={onPlayRole}
+      canPlayRole={canPlayRole}
+      onAddUnits={onAddUnits}
+      onRelease={onRelease}
+    />
   );
 }
 
@@ -111,6 +133,42 @@ function Transcript({ lines }: { lines: string[] }) {
   );
 }
 
+/** Available apparatus, closest first, toggle to select. */
+function UnitPicker({ units, zone, selected, onChange }: {
+  units: Unit[];
+  zone: number;
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const available = units
+    .filter((u) => u.status === "available")
+    .sort((a, b) => travelSeconds(a, zone) - travelSeconds(b, zone));
+  const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  if (available.length === 0) return <Text className="text-sm text-alert">No units available. Request mutual aid.</Text>;
+  return (
+    <View className="gap-1.5">
+      {available.map((u) => {
+        const on = selected.includes(u.id);
+        return (
+          <Pressable
+            key={u.id}
+            testID={`pick-${u.id}`}
+            onPress={() => toggle(u.id)}
+            className={`min-h-[44px] flex-row items-center gap-3 rounded-lg border px-3 ${on ? "border-radio bg-radio/10" : "border-line bg-surface"}`}
+          >
+            <Icon name={on ? "check" : "truck"} size={16} color={on ? "radio" : "muted"} />
+            <Text className="w-24 text-sm font-semibold text-ink">{u.name}</Text>
+            <Text className="flex-1 text-xs text-muted" numberOfLines={1}>
+              {UNIT_TYPE_LABEL[u.type]} · Sta {u.stationId} {stationById(u.stationId).name}
+            </Text>
+            <Mono className="text-xs text-dim">ETA {travelSeconds(u, zone)}s</Mono>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function PendingCall({ incident, units, clock, onDispatch }: {
   incident: Incident;
   units: Unit[];
@@ -119,10 +177,6 @@ function PendingCall({ incident, units, clock, onDispatch }: {
 }) {
   const [classified, setClassified] = useState<IncidentTypeId | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const available = units
-    .filter((u) => u.status === "available")
-    .sort((a, b) => travelSeconds(a, incident.zone) - travelSeconds(b, incident.zone));
-  const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   return (
     <Panel
@@ -153,26 +207,7 @@ function PendingCall({ incident, units, clock, onDispatch }: {
 
         <View className="gap-2">
           <Mono className="text-[11px] uppercase tracking-widest text-muted">2 · Assign apparatus ({selected.length})</Mono>
-          {available.length === 0 ? <Text className="text-sm text-alert">No units available. Send what you can.</Text> : null}
-          <View className="gap-1.5">
-            {available.map((u) => {
-              const on = selected.includes(u.id);
-              return (
-                <Pressable
-                  key={u.id}
-                  onPress={() => toggle(u.id)}
-                  className={`min-h-[44px] flex-row items-center gap-3 rounded-lg border px-3 ${on ? "border-radio bg-radio/10" : "border-line bg-surface"}`}
-                >
-                  <Icon name={on ? "check" : "truck"} size={16} color={on ? "radio" : "muted"} />
-                  <Text className="w-24 text-sm font-semibold text-ink">{u.name}</Text>
-                  <Text className="flex-1 text-xs text-muted" numberOfLines={1}>
-                    {UNIT_TYPE_LABEL[u.type]} · Sta {u.stationId} {stationById(u.stationId).name}
-                  </Text>
-                  <Mono className="text-xs text-dim">ETA {travelSeconds(u, incident.zone)}s</Mono>
-                </Pressable>
-              );
-            })}
-          </View>
+          <UnitPicker units={units} zone={incident.zone} selected={selected} onChange={setSelected} />
         </View>
 
         <Button
@@ -187,31 +222,71 @@ function PendingCall({ incident, units, clock, onDispatch }: {
   );
 }
 
-function ActiveCall({ incident, units, onPlayRole, canPlayRole }: {
+function ActiveCall({ incident, units, clock, onPlayRole, canPlayRole, onAddUnits, onRelease }: {
   incident: Incident;
   units: Unit[];
+  clock: number;
   onPlayRole: (unitId: string, crewId: string) => void;
   canPlayRole: boolean;
+  onAddUnits: (unitIds: string[]) => void;
+  onRelease: (unitId: string) => void;
 }) {
+  const [adding, setAdding] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const type = incidentTypeById(incident.typeId);
-  const assigned = units.filter((u) => incident.units.includes(u.id));
+  const assigned = units.filter((u) => incident.units.includes(u.id) && u.incidentId === incident.id);
   const ev = incident.dispatch;
-  const playable = canPlayRole && incident.status === "active" && !incident.scene;
+  const working = incident.status === "active";
+  const playable = canPlayRole && working && !incident.scene;
+  const missing = missingFor(incident, units);
+  const update = incident.update;
+  const updatePending = update?.status === "pending";
+  const playerUnit = incident.scene?.status === "active" ? incident.scene.unitId : null;
+
   return (
     <View className="gap-3">
+      {update ? (
+        <Panel
+          title={`Update · ${formatClock(update.at)}`}
+          icon="alert"
+          className={updatePending ? "border border-amber" : ""}
+          right={
+            <Mono className={`text-xs ${updatePending ? "text-amber" : update.status === "missed" ? "text-alert" : "text-radio"}`}>
+              {updatePending
+                ? `${Math.max(0, update.deadline - clock)}s`
+                : update.status === "missed"
+                  ? "MISSED"
+                  : update.by === "ai"
+                    ? "FILLED BY AI"
+                    : "FILLED"}
+            </Mono>
+          }
+        >
+          <View className="gap-2 p-3">
+            <Text className="text-sm leading-5 text-ink">{update.text}</Text>
+            {updatePending ? (
+              <Text className="text-sm font-semibold text-amber">
+                {missing.length ? `Add now: ${missing.join(", ")}` : "Requirements met."}
+              </Text>
+            ) : null}
+          </View>
+        </Panel>
+      ) : null}
+
       <Panel title={`${incident.number} · ${incident.status === "closed" ? "Closed" : "Working"}`} icon="flame">
         <View className="gap-3 p-3">
           <View>
             <Text className="text-lg font-bold text-ink">{type.label}</Text>
             <Text className="text-sm text-muted">{incident.address} · {incident.note}</Text>
+            <Text className="pt-1 text-xs text-dim">{incident.conditions}</Text>
           </View>
           {ev ? (
-            <View className={`gap-1 rounded-lg border p-3 ${ev.classificationCorrect && !ev.missing.length ? "border-radio/50 bg-radio/10" : "border-amber/50 bg-amber/10"}`}>
+            <View className={`gap-1 rounded-lg border p-3 ${ev.classificationCorrect && !missing.length ? "border-radio/50 bg-radio/10" : "border-amber/50 bg-amber/10"}`}>
               <Mono className="text-[10px] uppercase tracking-widest text-muted">CAD review · {ev.by === "ai" ? "AI Dispatcher" : "You"}</Mono>
               <Text className="text-sm text-ink">
-                {ev.classificationCorrect ? "Classification correct." : `Classified as ${incidentTypeById(ev.classifiedAs).short}; actual ${type.short}.`}
+                {ev.classificationCorrect ? "Classification correct." : `Classified as ${incidentTypeById(ev.classifiedAs).short}; dispatched as ${type.short}.`}
               </Text>
-              <Text className="text-sm text-ink">{ev.missing.length ? `Short on run card: ${ev.missing.join(", ")}` : "Run card met."}</Text>
+              <Text className="text-sm text-ink">{missing.length ? `Assignment short: ${missing.join(", ")}` : "Assignment met."}</Text>
               <Text className="text-xs text-muted">
                 {ev.firstDueIncluded ? "First-due company assigned." : "First-due company not assigned."} Queue time {ev.delaySeconds}s.
               </Text>
@@ -219,6 +294,44 @@ function ActiveCall({ incident, units, onPlayRole, canPlayRole }: {
           ) : null}
         </View>
       </Panel>
+
+      {working && !(pickerOpen || updatePending) ? (
+        <Button testID="open-add-units" label="Add apparatus to this call" icon="truck" onPress={() => setPickerOpen(true)} />
+      ) : null}
+
+      {working && (pickerOpen || updatePending) ? (
+        <Panel
+          title={`Add apparatus${adding.length ? ` · ${adding.length} selected` : ""}`}
+          icon="truck"
+          className={updatePending ? "border border-amber/60" : ""}
+          right={
+            !updatePending ? (
+              <Pressable accessibilityLabel="Close" onPress={() => { setPickerOpen(false); setAdding([]); }} className="h-8 w-8 items-center justify-center rounded-full">
+                <Icon name="x" size={14} color="muted" />
+              </Pressable>
+            ) : null
+          }
+        >
+          <View className="gap-3 p-3">
+            {updatePending && missing.length ? (
+              <Text className="text-xs text-amber">Needed: {missing.join(", ")}</Text>
+            ) : null}
+            <UnitPicker units={units} zone={incident.zone} selected={adding} onChange={setAdding} />
+            <Button
+              testID="add-units"
+              label={adding.length ? `Send ${adding.length} more unit${adding.length === 1 ? "" : "s"}` : "Select units to add"}
+              icon="radio"
+              tone={updatePending ? "primary" : "amber"}
+              disabled={adding.length === 0}
+              onPress={() => {
+                onAddUnits(adding);
+                setAdding([]);
+                setPickerOpen(false);
+              }}
+            />
+          </View>
+        </Panel>
+      ) : null}
 
       <Panel title="Personnel Responding" icon="users">
         <View className="gap-2 p-2">
@@ -228,20 +341,21 @@ function ActiveCall({ incident, units, onPlayRole, canPlayRole }: {
               <View className="flex-row items-center gap-2">
                 <StatusDot tone={STATUS_TONE[u.status]} />
                 <Text className="flex-1 text-sm font-bold text-ink">{u.name}</Text>
-                <Mono className="text-xs text-muted">{u.incidentId === incident.id ? STATUS_LABEL[u.status] : "REASSIGNED"}</Mono>
+                <Mono className="text-xs text-muted">{STATUS_LABEL[u.status]}</Mono>
+                {working && u.id !== playerUnit ? (
+                  <Button small label="Release" icon="x" onPress={() => onRelease(u.id)} />
+                ) : null}
               </View>
               {u.crew.map((c) => (
                 <View key={c.id} className="flex-row items-center gap-2 pl-4">
                   <Icon name={c.role === "chief" ? "star" : c.role === "officer" ? "shield" : "user"} size={14} color="muted" />
                   <Text className="flex-1 text-xs text-ink" numberOfLines={1}>{c.rank} {c.name}</Text>
-                  {playable && u.incidentId === incident.id ? (
-                    <Button small label="Play Role" icon="play" tone="amber" onPress={() => onPlayRole(u.id, c.id)} />
-                  ) : null}
+                  {playable ? <Button small label="Play Role" icon="play" tone="amber" onPress={() => onPlayRole(u.id, c.id)} /> : null}
                 </View>
               ))}
             </View>
           ))}
-          {incident.scene ? (
+          {incident.scene?.status === "active" ? (
             <Text className="p-2 text-xs text-amber">You are operating on this incident.</Text>
           ) : null}
         </View>

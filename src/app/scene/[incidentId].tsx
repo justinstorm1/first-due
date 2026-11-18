@@ -1,10 +1,10 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
-import Animated, { FadeInRight } from "react-native-reanimated";
+import Animated, { FadeInRight, SlideInRight } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { Screen } from "@/components/glass";
+import { glassSafe, Screen } from "@/components/glass";
 import { Icon } from "@/components/icon";
 import { SafeBody, TopBar, useScrollPadding } from "@/components/safe-area";
 import { QuestionSheet } from "@/components/question-sheet";
@@ -75,8 +75,9 @@ export default function SceneScreen() {
     </Panel>
   );
 
+  // Glass panels must not fade (opacity < 1 breaks Liquid Glass): slide in on iOS 26+.
   const actions = (
-    <Animated.View key={`${phase.key}-${scene.phaseIndex}`} entering={FadeInRight}>
+    <Animated.View key={`${phase.key}-${scene.phaseIndex}`} entering={glassSafe(FadeInRight, SlideInRight.duration(260))}>
       <Panel
         title={`Phase ${scene.phaseIndex + 1}/${scene.phases.length} · ${phase.title}`}
         icon={mayday ? "alert" : "flame"}

@@ -16,8 +16,11 @@ import {
   maydayPhase,
   migrateProfile,
   penalize,
+  missingFor,
   pickQuestion,
   recommendUnits,
+  rollEscalation,
+  applyEscalation,
   recordAnswer,
   sceneGrade,
   today,
@@ -80,6 +83,10 @@ interface GameState {
   tick: () => void;
   dispatchIncident: (incidentId: string, classifiedAs: IncidentTypeId, unitIds: string[]) => void;
   takeRole: (incidentId: string, unitId: string, crewId: string) => void;
+  /** Add apparatus to a working incident (edit the response / fill an update). */
+  addUnits: (incidentId: string, unitIds: string[]) => void;
+  /** Release a unit from an incident back to service. */
+  releaseUnit: (incidentId: string, unitId: string) => void;
   chooseAction: (incidentId: string, actionIndex: number) => void;
   answerScene: (incidentId: string, choice: number) => void;
   continueScene: (incidentId: string) => void;
@@ -241,6 +248,45 @@ export const useGame = create<GameState>()(
             return { ...i, status: "closed" };
           });
 
+          // Scenario updates on working calls
+          incidents = incidents.map((i) => {
+            if (i.status !== "active") return i;
+            if (i.updateAt !== null && now >= i.updateAt && !i.scene) {
+              let up = applyEscalation(i, now);
+              log = addLog(log, entry(now, "alert", `UPDATE ${i.number}: ${up.update!.text}`));
+              if (ai) {
+                const ids = recommendUnits(up, units);
+                units = assignUnits(units, ids, up.id, now);
+                up = { ...up, units: [...new Set([...up.units, ...ids])], update: { ...up.update!, status: "handled", by: "ai" } };
+                const names = ids.map((id) => units.find((u) => u.id === id)?.name).join(", ");
+                log = addLog(log, entry(now, "ai", `AI Dispatch: ${up.number} upgraded → ${names || "no units available, mutual aid requested"}`));
+              }
+              return up;
+            }
+            if (i.update?.status === "pending") {
+              if (missingFor(i, units).length === 0) {
+                return { ...i, update: { ...i.update, status: "handled", by: "player" } };
+              }
+              if (now >= i.update.deadline) {
+                if (ai) {
+                  const ids = recommendUnits(i, units);
+                  units = assignUnits(units, ids, i.id, now);
+                  return { ...i, units: [...new Set([...i.units, ...ids])], update: { ...i.update, status: "handled", by: "ai" } };
+                }
+                const short = missingFor(i, units).join(", ");
+                let r = recordAnswer(profile, "dispatch", false, { context: `${i.number} · Update`, text: `Did not fill the update on ${i.number} in time (short ${short})` });
+                profile = r.profile;
+                notices = [...notices, ...toNotices(r.events)];
+                r = penalize(profile, 3, `Update on ${i.number} not filled in time (short ${short}).`);
+                profile = r.profile;
+                notices = [...notices, ...toNotices(r.events)];
+                log = addLog(log, entry(now, "alert", `${i.number}: update not filled, short ${short}`));
+                return { ...i, update: { ...i.update, status: "missed" }, closeAt: i.closeAt ?? now + 60 };
+              }
+            }
+            return i;
+          });
+
           // Guarantee the standing-by member a run
           const seatUnit = s.seat ? units.find((u) => u.id === s.seat!.unitId) : undefined;
           if (ai && s.seat && seatUnit && !playerBusy && !pendingSceneId && playerCallAt !== null && now >= playerCallAt) {
@@ -289,7 +335,7 @@ export const useGame = create<GameState>()(
                 playerCallAt = null;
                 log = addLog(log, entry(now, "alert", `TONE OUT — ${unit.name}: ${incidentTypeById(i.typeId).short}, ${i.address}`));
               }
-              return next;
+              return { ...next, ...rollEscalation(next, now) };
             }
             if (!ai && !i.delayFlagged && now - i.createdAt > 60) {
               const r = penalize(profile, 3, `Delayed dispatch on ${i.number} (over 60 s in queue).`);
@@ -389,7 +435,9 @@ export const useGame = create<GameState>()(
             units,
             profile,
             notices: [...s.notices, ...toNotices(events)],
-            incidents: s.incidents.map((i) => (i.id === incidentId ? { ...i, status: "active", units: unitIds, dispatch: ev } : i)),
+            incidents: s.incidents.map((i) =>
+              i.id === incidentId ? { ...i, status: "active", units: unitIds, dispatch: ev, ...rollEscalation(i, now) } : i,
+            ),
             log: addLog(
               s.log,
               entry(now, "dispatch", `${inc.number} dispatched: ${names}`),
@@ -403,6 +451,61 @@ export const useGame = create<GameState>()(
                     choice: null,
                   }
                 : null,
+          });
+        },
+
+        addUnits: (incidentId, unitIds) => {
+          const s = get();
+          const inc = s.incidents.find((i) => i.id === incidentId);
+          if (!inc || inc.status !== "active" || unitIds.length === 0) return;
+          const now = s.clock;
+          const ids = unitIds.filter((id) => s.units.find((u) => u.id === id)?.status === "available");
+          const units = assignUnits(s.units, ids, incidentId, now);
+          const names = ids.map((id) => units.find((u) => u.id === id)?.name).join(", ");
+          let next: Incident = {
+            ...inc,
+            units: [...new Set([...inc.units, ...ids])],
+            // Keep the call open long enough for added units to arrive.
+            closeAt: inc.closeAt === null ? null : Math.max(inc.closeAt, now + 60),
+          };
+          let profile = s.profile;
+          let notices = s.notices;
+          let log = addLog(s.log, entry(now, "dispatch", `${inc.number} additional units: ${names}`));
+          if (inc.update?.status === "pending") {
+            const short = missingFor(next, units);
+            if (short.length === 0) {
+              next = { ...next, update: { ...inc.update, status: "handled", by: "player" } };
+              const r = recordAnswer(profile, "dispatch", true, {
+                context: `${inc.number} · Update`,
+                text: `Filled the update on ${inc.number} in ${now - inc.update.at}s`,
+              });
+              profile = r.profile;
+              notices = [...notices, ...toNotices(r.events)];
+              log = addLog(log, entry(now, "system", `CAD review: ${inc.number} upgraded assignment complete.`));
+            } else {
+              log = addLog(log, entry(now, "alert", `${inc.number} still short: ${short.join(", ")}`));
+            }
+          }
+          profile = logActivity(profile, {
+            kind: "dispatch",
+            text: `${inc.number}: added ${names}`,
+            context: inc.update?.status === "pending" ? "Update" : "Edited response",
+          });
+          set({ units, profile, notices, log, incidents: s.incidents.map((i) => (i.id === incidentId ? next : i)) });
+        },
+
+        releaseUnit: (incidentId, unitId) => {
+          const s = get();
+          const inc = s.incidents.find((i) => i.id === incidentId);
+          const unit = s.units.find((u) => u.id === unitId);
+          if (!inc || !unit || unit.incidentId !== incidentId) return;
+          if (inc.scene?.status === "active" && inc.scene.unitId === unitId) return; // can't release the player's own rig
+          set({
+            units: s.units.map((u) =>
+              u.id === unitId ? { ...u, status: "returning", incidentId: null, statusUntil: s.clock + travelSeconds(u, inc.zone) } : u,
+            ),
+            incidents: s.incidents.map((i) => (i.id === incidentId ? { ...i, units: i.units.filter((id) => id !== unitId) } : i)),
+            log: addLog(s.log, entry(s.clock, "dispatch", `${unit.name} released from ${inc.number}, returning to quarters`)),
           });
         },
 

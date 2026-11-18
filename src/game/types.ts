@@ -206,6 +206,24 @@ export interface DispatchEval {
   by: "player" | "ai";
 }
 
+/** A scheduled change in the scenario after dispatch (e.g. alarm → working fire, 2nd alarm). */
+export interface Escalation {
+  /** The incident becomes this call type (its run card replaces the old one). */
+  toType?: IncidentTypeId;
+  /** Additional apparatus required on top of the (new) run card. */
+  extra?: Requirement[];
+  text: string;
+}
+
+export interface IncidentUpdate {
+  text: string;
+  at: number;
+  /** Clock time by which the required apparatus must be assigned. */
+  deadline: number;
+  status: "pending" | "handled" | "missed";
+  by?: "player" | "ai";
+}
+
 export interface Incident {
   id: string;
   number: string;
@@ -222,6 +240,13 @@ export interface Incident {
   status: "pending" | "active" | "closed";
   units: string[];
   dispatch: DispatchEval | null;
+  /** Requirements added by updates, on top of the call type's run card. */
+  planExtra: Requirement[];
+  /** Scheduled scenario update (hidden until it fires). */
+  escalation: Escalation | null;
+  updateAt: number | null;
+  /** The latest scenario update shown in CAD. */
+  update: IncidentUpdate | null;
   closeAt: number | null;
   delayFlagged: boolean;
   scene: SceneState | null;

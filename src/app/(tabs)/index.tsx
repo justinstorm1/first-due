@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
-import { RADIUS, Screen, Surface } from "@/components/glass";
+import { glassSafe, RADIUS, Screen, Surface } from "@/components/glass";
 import { Icon } from "@/components/icon";
 import { SafeBody, TAB_SCROLL_PADDING, TopBar } from "@/components/safe-area";
 import { SeatPicker } from "@/components/seat-picker";
@@ -102,7 +102,7 @@ export default function MainMenu() {
         <Mono className="px-1 text-[11px] uppercase tracking-widest text-dim">Select a mode</Mono>
         <View className="flex-row flex-wrap gap-3">
           {MODES.map((m, i) => (
-            <Animated.View key={m.key} entering={FadeInDown.delay(i * 60)} style={{ width: twoUp ? "48.9%" : "100%" }}>
+            <Animated.View key={m.key} entering={glassSafe(FadeInDown.delay(i * 60))} style={{ width: twoUp ? "48.9%" : "100%" }}>
               <Surface interactive radius={RADIUS.card} className="h-full android:bg-panel web:border web:border-line web:bg-panel/90">
                 <Pressable
                   testID={`mode-${m.key}`}

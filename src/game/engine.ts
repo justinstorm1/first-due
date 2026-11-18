@@ -1,3 +1,4 @@
+import { ESCALATIONS, UPDATE_WINDOW } from "@/data/escalations";
 import { incidentTypeById, INCIDENT_TYPES, TIMES, WEATHER } from "@/data/incident-types";
 import { isGenerated, QUESTIONS } from "@/data/questions";
 import { MAYDAY_PHASE, PHASES_BY_FAMILY, SEAT_LINE, VEHICLE_FIRE, type PhaseDef } from "@/data/scenes";
@@ -12,6 +13,7 @@ import type {
   Metrics,
   Profile,
   Question,
+  Requirement,
   SceneState,
   ScenePhase,
   Topic,
@@ -68,6 +70,10 @@ export function createIncident(
     status: "pending",
     units: [],
     dispatch: null,
+    planExtra: [],
+    escalation: null,
+    updateAt: null,
+    update: null,
     closeAt: null,
     delayFlagged: false,
     scene: null,
@@ -81,17 +87,67 @@ export function travelSeconds(unit: Unit, zone: number) {
   return Math.round(6 + dist * 0.35);
 }
 
-/** Satisfy the SOG plan greedily with the closest available units. */
+/** Current required apparatus: the call type's run card plus anything added by updates. */
+export function requirementsFor(incident: Incident): Requirement[] {
+  return [...incidentTypeById(incident.typeId).plan, ...incident.planExtra];
+}
+
+const reqLabel = (req: Requirement) => req.types.map((t) => UNIT_TYPE_LABEL[t]).join("/");
+
+/** Greedily match units to requirements; returns the shortfall per requirement. */
+function shortfalls(reqs: Requirement[], sent: Unit[]) {
+  const used = new Set<string>();
+  return reqs
+    .map((req) => {
+      const matches = sent.filter((u) => req.types.includes(u.type) && !used.has(u.id)).slice(0, req.count);
+      matches.forEach((u) => used.add(u.id));
+      return { req, short: req.count - matches.length };
+    })
+    .filter((x) => x.short > 0);
+}
+
+/** Units still committed to this incident. */
+export const assignedUnits = (incident: Incident, units: Unit[]) =>
+  units.filter((u) => incident.units.includes(u.id) && u.incidentId === incident.id);
+
+/** Human-readable list of apparatus still needed, e.g. ["2× Engine", "1× Ladder"]. */
+export function missingFor(incident: Incident, units: Unit[]): string[] {
+  return shortfalls(requirementsFor(incident), assignedUnits(incident, units)).map((x) => `${x.short}× ${reqLabel(x.req)}`);
+}
+
+/** Closest available units that fill whatever the incident is still short. */
 export function recommendUnits(incident: Incident, units: Unit[]): string[] {
-  const type = incidentTypeById(incident.typeId);
   const chosen: string[] = [];
-  for (const req of type.plan) {
+  for (const { req, short } of shortfalls(requirementsFor(incident), assignedUnits(incident, units))) {
     const candidates = units
       .filter((u) => u.status === "available" && req.types.includes(u.type) && !chosen.includes(u.id))
       .sort((x, y) => travelSeconds(x, incident.zone) - travelSeconds(y, incident.zone));
-    chosen.push(...candidates.slice(0, req.count).map((u) => u.id));
+    chosen.push(...candidates.slice(0, short).map((u) => u.id));
   }
   return chosen;
+}
+
+/** Decide (at dispatch time) whether this call will get a scenario update later. */
+export function rollEscalation(incident: Incident, now: number): Pick<Incident, "escalation" | "updateAt"> {
+  const rule = ESCALATIONS[incident.typeId];
+  if (!rule || incident.scene || Math.random() >= rule.chance) return { escalation: null, updateAt: null };
+  return { escalation: pick(rule.options), updateAt: now + 25 + Math.floor(Math.random() * 21) };
+}
+
+/** Apply a due escalation: change the call type and/or add requirements, and raise an update. */
+export function applyEscalation(incident: Incident, now: number): Incident {
+  const e = incident.escalation;
+  if (!e) return incident;
+  return {
+    ...incident,
+    typeId: e.toType ?? incident.typeId,
+    planExtra: [...incident.planExtra, ...(e.extra ?? [])],
+    escalation: null,
+    updateAt: null,
+    update: { text: e.text, at: now, deadline: now + UPDATE_WINDOW, status: "pending" },
+    // Keep the call open until the new apparatus arrives (the next arrival sets closeAt).
+    closeAt: null,
+  };
 }
 
 export function evaluateDispatch(
@@ -102,18 +158,8 @@ export function evaluateDispatch(
   now: number,
   by: "player" | "ai",
 ): DispatchEval {
-  const type = incidentTypeById(incident.typeId);
   const sent = units.filter((u) => unitIds.includes(u.id));
-  const missing: string[] = [];
-  const used = new Set<string>();
-  for (const req of type.plan) {
-    const matches = sent.filter((u) => req.types.includes(u.type) && !used.has(u.id)).slice(0, req.count);
-    matches.forEach((u) => used.add(u.id));
-    if (matches.length < req.count) {
-      const label = req.types.map((t) => UNIT_TYPE_LABEL[t]).join("/");
-      missing.push(`${req.count - matches.length}× ${label}`);
-    }
-  }
+  const missing = shortfalls(requirementsFor(incident), sent).map((x) => `${x.short}× ${reqLabel(x.req)}`);
   return {
     classifiedAs,
     classificationCorrect: classifiedAs === incident.typeId,

@@ -10,6 +10,16 @@ cssInterop(GlassView, { className: "style" });
 /** iOS 26+ Liquid Glass is available (false on Android, web and older iOS). */
 export const LIQUID_GLASS = Platform.OS === "ios" && isLiquidGlassAvailable();
 
+/**
+ * Liquid Glass does not render at low opacity, and Apple advises against animating the
+ * opacity of a GlassView or any of its parents. Wrap opacity-based entering animations
+ * (FadeIn*, ZoomIn, …) around glass content with this: on iOS 26+ it returns the
+ * glass-safe fallback (default: no animation), elsewhere the original animation.
+ */
+export function glassSafe<T, F = undefined>(animation: T, fallback?: F): T | F | undefined {
+  return LIQUID_GLASS ? fallback : animation;
+}
+
 /** Corner radii per platform design language (iOS continuous cards, M3 large shape, shadcn radius). */
 export const RADIUS = {
   card: Platform.select({ ios: 26, android: 24, default: 12 }) as number,

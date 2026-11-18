@@ -22,7 +22,9 @@ import { useGame } from "@/store/game-store";
 export default function WebTabsLayout() {
   const { width } = useWindowDimensions();
   const compact = width < 720;
-  const pending = useGame((s) => (s.role === "dispatcher" ? s.incidents.filter((i) => i.status === "pending").length : 0));
+  const pending = useGame((s) =>
+    s.role === "dispatcher" ? s.incidents.filter((i) => i.status === "pending" || i.update?.status === "pending").length : 0,
+  );
   const profile = useGame((s) => s.profile);
 
   const links = (
@@ -88,7 +90,12 @@ export default function WebTabsLayout() {
       <TopInsetConsumed.Provider value={!compact}>
         {/* Fixed-height slot so the bar never gets pushed off-screen by tall content. */}
         <View style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-          <TabSlot />
+          {/*
+            TabSlot's container defaults to flexGrow:1 + flexShrink:0 with an auto basis, so on web
+            it grows to the full content height and nothing inside can scroll. Constrain it to the
+            available space so each screen's ScrollView gets a bounded height.
+          */}
+          <TabSlot style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minHeight: 0 }} />
         </View>
       </TopInsetConsumed.Provider>
       {compact ? bottomBar : null}

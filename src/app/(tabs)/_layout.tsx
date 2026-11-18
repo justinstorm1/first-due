@@ -9,7 +9,8 @@ import { colors } from "@/theme/colors";
  * navigator (automatic ScrollView insets on iOS, a bottom SafeAreaView on Android).
  */
 export default function TabsLayout() {
-  const pending = useGame((s) => s.incidents.filter((i) => i.status === "pending").length);
+  // Badge = new 911 calls + calls with an unfilled update.
+  const pending = useGame((s) => s.incidents.filter((i) => i.status === "pending" || i.update?.status === "pending").length);
   const dispatcher = useGame((s) => s.role === "dispatcher");
 
   return (

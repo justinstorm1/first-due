@@ -33,6 +33,8 @@ export default function DispatchScreen() {
   const dq = useGame((s) => s.dispatchQuestion);
   const dispatchIncident = useGame((s) => s.dispatchIncident);
   const takeRole = useGame((s) => s.takeRole);
+  const addUnits = useGame((s) => s.addUnits);
+  const releaseUnit = useGame((s) => s.releaseUnit);
   const takeConsole = useGame((s) => s.takeConsole);
   const answerDQ = useGame((s) => s.answerDispatchQuestion);
   const closeDQ = useGame((s) => s.closeDispatchQuestion);
@@ -71,6 +73,12 @@ export default function DispatchScreen() {
         dispatchIncident(selected.id, cls, ids);
       }}
       onPlayRole={(unitId, crewId) => selected && playRole(selected.id, unitId, crewId)}
+      onAddUnits={(ids) => {
+        if (!selected) return;
+        haptic("success");
+        addUnits(selected.id, ids);
+      }}
+      onRelease={(unitId) => selected && releaseUnit(selected.id, unitId)}
     />
   );
 
