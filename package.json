@@ -46,7 +46,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web",
+    "build:vercel": "expo export --platform web && node scripts/vercel-output.mjs"
   },
   "private": true
 }
